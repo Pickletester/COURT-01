@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Court 1 — Status Board</title>
+  <title>Court 2 — Status Board</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
@@ -117,7 +117,7 @@
 <body>
   <div class="bar" id="bar">
     <!-- Court Number -->
-    <div id="cn" class="sec"><div class="val pulse-blue" id="cno">16</div></div>
+    <div id="cn" class="sec"><div class="val pulse-blue" id="cno">2</div></div>
     <!-- Current Event -->
     <div id="cur" class="sec">
         <div class="label">In Progress</div>
@@ -143,7 +143,7 @@
 <script>
 (function(){
   // ======= CONFIG: Update these for each physical display =======
-  var COURT_NO = 1; // *** SET FOR COURT 1 ***
+  var COURT_NO = 2; // *** SET FOR COURT 2 ***
   var ORG_MEMBER_ID = "12674";
   var AUTH_B64 = "Basic T3JnXzEyNjc0OjEyNjc0XzE4NWFmZGE3LTdiNGYtNGIwYS04YmEwLWE3OWVhYzc4ODExZA==";
   var TZ = "America/New_York"; // Timezone for displaying local time
@@ -202,10 +202,11 @@
       // **CHECK 1 (FIXED): TRUE Facility-Wide Drop-in (Show everywhere)**
       // Only include truly generic, all-facility events (drop/open play).
       if (txt.includes("drop") || txt.includes("open play")) {
-          return true;
+          return true; // MATCH! It's a general event, show it everywhere.
       }
 
       // **CHECK 2: Exact Court Number Match (Specific reservation to this court)**
+      // Use RegExp to ensure we only match the exact number 'n' (e.g., 'court 2') 
       var exactCourtRegex = new RegExp("(court\\s|court\\s#)"+n+"\\b", "i");
       if (exactCourtRegex.test(txt)) {
           return true;
