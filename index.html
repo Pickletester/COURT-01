@@ -143,7 +143,7 @@
 <script>
 (function(){
   // ======= CONFIG: Update these for each physical display =======
-  var COURT_NO = 2; // *** SET FOR COURT 2 ***
+  var COURT_NO = 1; // *** SET FOR COURT 1 ***
   var ORG_MEMBER_ID = "12674";
   var AUTH_B64 = "Basic T3JnXzEyNjc0OjEyNjc0XzE4NWFmZGE3LTdiNGYtNGIwYS04YmEwLWE3OWVhYzc4ODExZA==";
   var TZ = "America/New_York"; // Timezone for displaying local time
@@ -206,7 +206,7 @@
       }
 
       // **CHECK 2: Exact Court Number Match (Specific reservation to this court)**
-      // Use RegExp to ensure we only match the exact number 'n' (e.g., 'court 2') 
+      // Use RegExp to ensure we only match the exact number 'n' (e.g., 'court 1') 
       var exactCourtRegex = new RegExp("(court\\s|court\\s#)"+n+"\\b", "i");
       if (exactCourtRegex.test(txt)) {
           return true;
@@ -249,7 +249,39 @@
     return null;
   }
   
-  // ======= CLOCK and other functions remain the same =======
+  // ======= XHR (API Request) =======
+  function xhrJSON(url, headers, timeoutMs, cb){
+    try{
+      var x = new XMLHttpRequest();
+      x.open("GET", url, true);
+      x.timeout = timeoutMs||10000; // Increased timeout to 10s
+      if(headers){ for(var k in headers){ if(headers.hasOwnProperty(k)){ x.setRequestHeader(k, headers[k]); } } }
+      
+      x.onreadystatechange = function(){ 
+        if(x.readyState === 4){ 
+          if(x.status >= 200 && x.status < 300){ 
+            var data=null; 
+            try{ 
+              data=JSON.parse(x.responseText); 
+              console.log("[DEBUG] API call succeeded for URL:", url.substring(0, 70) + '...');
+            }catch(e){ 
+              data=null; 
+              console.error("[DEBUG] API call succeeded but failed to parse JSON:", e);
+            } 
+            cb(null, data); 
+          } else { 
+            cb(new Error("HTTP "+x.status + " for URL: " + url.substring(0, 70) + '...'));
+          } 
+        } 
+      };
+      x.ontimeout = function(){ cb(new Error("timeout")); };
+      x.onerror = function(){ cb(new Error("network error")); };
+      x.send();
+    }catch(e){ cb(e); }
+  }
+
+
+  // ======= OTHER FUNCTIONS (Clock, Render, Data Fetching) =======
   function tickClock(){
     var el = document.getElementById('clock');
     el.textContent = toLocalNY(new Date());
@@ -257,19 +289,6 @@
     var delay = 1000 - (now.getMilliseconds());
     if(delay < 250) delay = 250;
     setTimeout(tickClock, delay);
-  }
-
-  function xhrJSON(url, headers, timeoutMs, cb){
-    try{
-      var x = new XMLHttpRequest();
-      x.open("GET", url, true);
-      x.timeout = timeoutMs||8000;
-      if(headers){ for(var k in headers){ if(headers.hasOwnProperty(k)){ x.setRequestHeader(k, headers[k]); } } }
-      x.onreadystatechange = function(){ if(x.readyState === 4){ if(x.status >= 200 && x.status < 300){ var data=null; try{ data=JSON.parse(x.responseText); }catch(e){ data=null; } cb(null, data); } else { cb(new Error("HTTP "+x.status)); } } };
-      x.ontimeout = function(){ cb(new Error("timeout")); };
-      x.onerror = function(){ cb(new Error("network")); };
-      x.send();
-    }catch(e){ cb(e); }
   }
 
   var cdTimer = null, cdMode = "none", cdTarget = null;
@@ -356,7 +375,6 @@
     }
   }
 
-  // ======= DATA FETCHING & RENDERING =======
   var cacheEv = [], cacheRes = [];
 
   function refresh(){
@@ -366,9 +384,9 @@
     // API endpoint for all reservations today
     var res = "https://api.courtreserve.com/api/v1/reservationreport/listactive?orgMemberId="+ORG_MEMBER_ID+"&reservationsFromDate="+d+"T00:00:00&reservationsToDate="+d+"T23:59:59&includePlayers=true";
 
-    xhrJSON(ev, {"Authorization":AUTH_B64}, 8000, function(errE, dataE){
+    xhrJSON(ev, {"Authorization":AUTH_B64}, 10000, function(errE, dataE){
       if(!errE){ cacheEv = pickArray(dataE); } else { console.error("Error fetching events:", errE); }
-      xhrJSON(res, {"Authorization":AUTH_B64}, 8000, function(errR, dataR){
+      xhrJSON(res, {"Authorization":AUTH_B64}, 10000, function(errR, dataR){
         if(!errR){ cacheRes = pickArray(dataR); } else { console.error("Error fetching reservations:", errR); }
         computeAndRender();
       });
