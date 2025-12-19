@@ -539,22 +539,22 @@
     var info = { bubbleColor: null, label: "", overlayBg: "#0c0c0c" };
 
     if (tNorm.indexOf("4.5+") >= 0 || tNorm.indexOf("4.5-") >= 0 || tNorm.indexOf("5.0") >= 0){
-      info.bubbleColor = "#dc2626"; info.label = "4.5+"; info.overlayBg = "#b91c1c";
+      info.bubbleColor = "#cfd829"; info.label = "4.5+"; info.overlayBg = "#cfd829";
     } else if (tNorm.indexOf("4.0-4.4")>=0 || tNorm.indexOf("4.0-4.49")>=0 || tNorm.indexOf("4.0-4.5")>=0 || tNorm.indexOf("4.0-4")>=0){
-      info.bubbleColor = "#f97316"; info.label = "4.0–4.49"; info.overlayBg = "#ea580c";
+      info.bubbleColor = "#f47855"; info.label = "4.0–4.49"; info.overlayBg = "#f47855";
     } else if (tNorm.indexOf("3.5-3.9")>=0 || tNorm.indexOf("3.5-3.99")>=0 || tNorm.indexOf("3.5+")>=0){
-      info.bubbleColor = "#8b5cf6"; info.label = "3.5–3.99"; info.overlayBg = "#6d28d9";
+      info.bubbleColor = "#ee3c85"; info.label = "3.5–3.99"; info.overlayBg = "#ee3c85";
     } else if (tNorm.indexOf("3.0-3.4")>=0 || tNorm.indexOf("3.0-3.49")>=0){
       info.bubbleColor = "#22c55e"; info.label = "3.0–3.49"; info.overlayBg = "#15803d";
     } else if (tNorm.indexOf("2.0-2.9")>=0 || tNorm.indexOf("2.0-2.99")>=0){
       info.bubbleColor = "#38bdf8"; info.label = "2.0–2.99"; info.overlayBg = "#0ea5e9";
     } else {
       if(tLow.indexOf("advanced") >= 0){
-        info.bubbleColor = "#dc2626"; info.label = "4.5+"; info.overlayBg = "#b91c1c";
+        info.bubbleColor = "#cfd829"; info.label = "4.5+"; info.overlayBg = "#cfd829";
       } else if(tLow.indexOf("intermediate+") >= 0){
-        info.bubbleColor = "#8b5cf6"; info.label = "3.5–3.99"; info.overlayBg = "#6d28d9";
+        info.bubbleColor = "#ee3c85"; info.label = "3.5–3.99"; info.overlayBg = "#6d28d9";
       } else if(tLow.indexOf("intermediate") >= 0){
-        info.bubbleColor = "#22c55e"; info.label = "3.0–3.49"; info.overlayBg = "#15803d";
+        info.bubbleColor = "#48b749"; info.label = "3.0–3.49"; info.overlayBg = "#15803d";
       } else if(tLow.indexOf("beginner") >= 0){
         info.bubbleColor = "#38bdf8"; info.label = "2.0–2.99"; info.overlayBg = "#0ea5e9";
       }
