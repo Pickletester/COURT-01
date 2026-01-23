@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Court 1 — TB1-SAFE (Names & Hours + DUPR)</title>
+  <title>Court 1 — TB1-SAFE (Hardened + 30s fade)</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
@@ -55,6 +55,8 @@
     .pulse-blue { animation: pulseBlue 2.8s ease-in-out infinite; }
     @keyframes pulseBlue { 0%,100%{ border-color:#ffffff; } 50%{ border-color:#7fbfff; } }
     .pulse-red { animation: pulseRed 2.2s ease-in-out infinite; }
+
+    .nopulse { animation:none; }
     @keyframes pulseRed { 0%,100%{ border-color:#ffffff; } 50%{ border-color:#ff5a5a; } }
 
     .expired-msg { font-size:28px; color:#ff4444; font-weight:900; }
@@ -91,7 +93,7 @@
     .overlayBody{ font-size:30px; line-height:1.25; font-weight:700; margin-top:10px; }
 
     @keyframes popIn{ 0%{ transform:scale(.7); opacity:0; } 100%{ transform:scale(1); opacity:1; } }
-    @keyframes glowPulse{ 0%,100%{ box-shadow: 0 0 15px rgba(0,140,255,.55); } 50%{ box-shadow: 0 0 40px rgba(0,180,255,.8); } }
+    @keyframes glowPulse{ 0%,100%{ box-shadow: 0 0 15px rgba(0,140,255,.55); } 50%{ box-shadow:0 0 40px rgba(0,180,255,.8); } }
   </style>
 </head>
 <body>
@@ -113,42 +115,193 @@
 
 <script>
 (function(){
+  // ======= CONFIG =======
   var COURT_NO   = 1;
   var TZ         = "America/New_York";
   var PROXY_BASE = "https://courtreserve-proxy.s-jackson.workers.dev/api/day";
 
-  var cdTimer = null, cdMode = "none", cdTarget = null;
-
-  // DUPR / skill state
+  // current "skill" info (drives bar gradient + overlay level)
   var currentLevelLabel = "";
   var currentLevelBg    = "#0c0c0c";
   var currentIsSkill    = false;
 
+  // countdown state
+  var cdTimer = null, cdMode = "none", cdTarget = null;
+  var nxtStart = null;
+  var lastCurName = "";
+  var lastGood = null;
+
+  // ======= UTIL =======
+  function pad2(n){ return (n<10?"0":"")+n; }
+
   function toLocalNY(d){
-    return d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', hour12:true, timeZone: TZ });
+    try{
+      return d.toLocaleTimeString('en-US', {
+        hour:'numeric', minute:'2-digit', hour12:true, timeZone: TZ
+      });
+    } catch(e){
+      return d.getHours()+":"+pad2(d.getMinutes());
+    }
   }
 
+  // More robust time parsing (handles Date, epoch, /Date(…)/, ISO strings)
   function parseTimeAny(t){
-    if(!t) return null;
-    var d = new Date(t);
-    return isNaN(d.getTime()) ? null : d;
+    if(!t){return null;}
+    if(Object.prototype.toString.call(t)==='[object Date]'){
+      return isNaN(t.getTime())?null:t;
+    }
+    if(typeof t==='number'){ return new Date(t>1e12?t:t*1000); }
+    if(typeof t==='string'){
+      var s=t.trim();
+      var m=s.match(/^\/Date\((\d+)\)\/$/i);
+      if(m){ return new Date(parseInt(m[1],10)); }
+      var d=new Date(s);
+      if(!isNaN(d.getTime())) return d;
+    }
+    return null;
   }
 
   function pickArray(c){
-    if(!c) return [];
-    return Array.isArray(c) ? c : (c.Data || c.data || []);
+    if(!c){return [];}
+    if(Array.isArray(c)) return c;
+    if(typeof c==='object'){
+      if(Array.isArray(c.Data)) return c.Data;
+      if(Array.isArray(c.data)) return c.data;
+      if(Array.isArray(c.Items)) return c.Items;
+      if(Array.isArray(c.Results)) return c.Results;
+    }
+    return [];
   }
 
+  // ======= SMART COURT FILTER (SAFE) =======
+  // Scans "court-ish" fields & strings (ranges like "Courts 1-4", lists "Court 1,3&5", etc.)
   function containsCourtN(rec, n){
-    // NOTE: This is your "stable" matcher. If you want it stronger later, we can,
-    // but keeping it simple helps TB1 stability.
-    var s = JSON.stringify(rec).toLowerCase();
-    return s.indexOf("court #"+n) >= 0 || s.indexOf("court "+n) >= 0 || s.indexOf("courts "+n) >= 0;
+    n = Number(n) || 1;
+    if(!rec) return false;
+    var visited = (typeof WeakSet !== "undefined") ? new WeakSet() : null;
+
+    function stringHasCourtN(str, n){
+      if(!str) return false;
+      var s = String(str).toLowerCase();
+      if(s.indexOf("court") === -1) return false;
+
+      if(s.indexOf("court #"+n) >= 0) return true;
+      if(s.indexOf("court "+n)  >= 0) return true;
+      if(s.indexOf("courts "+n) >= 0) return true;
+
+      var rg = /courts?\s*#?\s*(\d+)\s*[-–]\s*#?\s*(\d+)/g;
+      var m;
+      while((m = rg.exec(s)) !== null){
+        var a = +m[1], b = +m[2];
+        if(n >= Math.min(a,b) && n <= Math.max(a,b)) return true;
+      }
+
+      if(s.indexOf(",") >= 0 || s.indexOf("&") >= 0 || s.indexOf("/") >= 0){
+        var listRg = /court(?:s)?[^0-9]*((\d+)(?:\s*[,/&]\s*\d+)*)/gi;
+        var lm;
+        while((lm = listRg.exec(s)) !== null){
+          var nums = lm[1].split(/[,/&]/);
+          for(var i=0;i<nums.length;i++){
+            var num = parseInt(nums[i],10);
+            if(num === n) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function keyLooksCourtRelated(k){
+      if(!k) return false;
+      var s = String(k).toLowerCase();
+      return (
+        s.indexOf("court") >= 0 ||
+        s.indexOf("resource") >= 0 ||
+        s.indexOf("facilitycourt") >= 0 ||
+        s.indexOf("courtid") >= 0 ||
+        s.indexOf("court_id") >= 0 ||
+        s.indexOf("resourceid") >= 0 ||
+        s.indexOf("resource_id") >= 0
+      );
+    }
+
+    function scan(value, keyHint){
+      if(value == null) return false;
+      var t = typeof value;
+
+      if(t === "number"){
+        return keyLooksCourtRelated(keyHint) && (value === n);
+      }
+      if(t === "string"){
+        return stringHasCourtN(value, n);
+      }
+      if(Array.isArray(value)){
+        for(var i=0;i<value.length;i++){
+          if(scan(value[i], keyHint)) return true;
+        }
+        return false;
+      }
+      if(t === "object"){
+        if(visited && visited.has(value)) return false;
+        if(visited) visited.add(value);
+        for(var k in value){
+          if(!Object.prototype.hasOwnProperty.call(value,k)) continue;
+          var lowK = k.toLowerCase();
+          // avoid matching "(Courts 1-3)" text inside titles
+          if(lowK === "title" || lowK === "eventname" || lowK === "name") continue;
+          if(scan(value[k], k)) return true;
+        }
+      }
+      return false;
+    }
+
+    return scan(rec, "");
   }
 
+  // ======= CLOCK (drift-corrected) =======
+  function tickClock(){
+    var el = document.getElementById('clock');
+    el.textContent = toLocalNY(new Date());
+    var now = new Date();
+    var delay = 1000 - now.getMilliseconds();
+    if(delay < 250) delay = 250;
+    setTimeout(tickClock, delay);
+  }
+
+  // ======= XHR (safe) =======
+  function xhrJSON(url, headers, timeoutMs, cb){
+    try{
+      var x = new XMLHttpRequest();
+      x.open("GET", url, true);
+      x.timeout = timeoutMs||8000;
+      if(headers){
+        for(var k in headers){
+          if(headers.hasOwnProperty(k)){
+            x.setRequestHeader(k, headers[k]);
+          }
+        }
+      }
+      x.onreadystatechange = function(){
+        if(x.readyState === 4){
+          if(x.status >= 200 && x.status < 300){
+            var data=null;
+            try{ data=JSON.parse(x.responseText); }catch(e){ data=null; }
+            cb(null, data);
+          } else { cb(new Error("HTTP "+x.status)); }
+        }
+      };
+      x.ontimeout = function(){ cb(new Error("timeout")); };
+      x.onerror   = function(){ cb(new Error("network")); };
+      x.send();
+    }catch(e){ cb(e); }
+  }
+
+  // ======= UI HELPERS =======
   function setPulse(mode){
     var el = document.getElementById('cno');
-    el.className = "val " + (mode === "red" ? "pulse-red" : "pulse-blue");
+    el.className = "val";
+    if(mode === "blue"){ el.className += " pulse-blue"; }
+    else if(mode === "red"){ el.className += " pulse-red"; }
+    else { el.className += " nopulse"; }
   }
 
   function darkenHex(hex, pct){
@@ -162,25 +315,36 @@
     return "#"+("0"+r.toString(16)).slice(-2)+("0"+g.toString(16)).slice(-2)+("0"+b.toString(16)).slice(-2);
   }
 
+  // mode: "blue" (default), "skill" (skill gradient), "red" (urgent)
   function setBarMode(mode){
-    var bar = document.getElementById('bar'), cn = document.getElementById('cn');
+    var bar = document.getElementById('bar');
+    var cn  = document.getElementById('cn');
 
     if(mode === "red"){
       bar.className = "bar red";
-      cn.className = "sec alert";
+      cn.className  = "sec alert";
       return;
     }
 
     cn.className = "sec";
 
-    if(mode === "skill" && currentIsSkill){
-      bar.style.setProperty("--skillB", currentLevelBg || "#22335d");
-      bar.style.setProperty("--skillA", darkenHex(currentLevelBg || "#22335d", 0.28));
+    if(mode === "skill"){
+      var base = currentLevelBg || "#22335d";
+      bar.style.setProperty("--skillB", base);
+      bar.style.setProperty("--skillA", darkenHex(base, 0.28));
       bar.className = "bar skill";
       return;
     }
 
     bar.className = "bar";
+  }
+
+  function resetExpiredVisuals(){
+    var outEl = document.getElementById("cdv");
+    outEl.className = "val";
+    var lblEl = document.getElementById("cdlbl");
+    lblEl.className = "label";
+    lblEl.textContent = (cdMode === "next") ? "Time Until" : "Time Left";
   }
 
   // ===== DUPR / Skill parsing from title =====
@@ -191,12 +355,11 @@
 
     var info = { label:"", bg:"#0c0c0c", isSkill:false };
 
-    // exact numeric bands
     if (tNorm.indexOf("4.5+") >= 0 || tNorm.indexOf("4.5-") >= 0 || tNorm.indexOf("5.0") >= 0){
       info.label = "4.5+";
       info.bg    = "#cfd829";
       info.isSkill = true;
-    } else if (tNorm.indexOf("4.0-4.4")>=0 || tNorm.indexOf("4.0-4.49")>=0 || tNorm.indexOf("4.0-4.5")>=0){
+    } else if (tNorm.indexOf("4.0-4.4")>=0 || tNorm.indexOf("4.0-4.49")>=0 || tNorm.indexOf("4.0-4.5")>=0 || tNorm.indexOf("4.0-4")>=0){
       info.label = "4.0–4.49";
       info.bg    = "#f47855";
       info.isSkill = true;
@@ -213,7 +376,6 @@
       info.bg    = "#0ea5e9";
       info.isSkill = true;
     } else {
-      // keywords (optional fallback)
       if(tLow.indexOf("advanced") >= 0){
         info.label = "4.5+";
         info.bg    = "#cfd829";
@@ -235,13 +397,133 @@
     return info;
   }
 
-  function applySkillFromName(name){
-    var info = getLevelInfoFromTitle(name || "");
-    currentLevelLabel = info.label;
-    currentLevelBg    = info.bg;
-    currentIsSkill    = !!info.isSkill;
+  // ======= COUNTDOWN (with 30s fade on expired) =======
+  function startCountdown(targetMs, mode){
+    cdTarget = targetMs; cdMode = mode||"none";
+    if(cdTimer){ clearTimeout(cdTimer); cdTimer = null; }
+
+    function tick(){
+      var out = document.getElementById('cdv');
+      var lbl = document.getElementById('cdlbl');
+
+      if(!cdTarget){
+        out.className = "val";
+        out.textContent = "--";
+        lbl.textContent = "Time Left";
+        setPulse("blue");
+        setBarMode("blue");
+        cdTimer = setTimeout(tick, 1000);
+        return;
+      }
+
+      var diff  = cdTarget - Date.now();
+
+      if(diff > 0){
+        if(cdMode === "cur" && diff <= 60000){
+          setPulse("red");
+          setBarMode("red");
+        } else {
+          setPulse("blue");
+          setBarMode(currentIsSkill ? "skill" : "blue");
+        }
+
+        if(out.className.indexOf("expired-msg") !== -1){
+          out.className = "val";
+        }
+
+        var totalSec = Math.floor(diff/1000);
+        var totalMin = Math.floor(diff/60000);
+        if(diff <= 60000){
+          out.textContent = (totalSec % 60) + "s";
+        } else if(totalMin >= 60){
+          out.textContent = Math.floor(totalMin/60) + "h " + (totalMin%60) + "m";
+        } else {
+          out.textContent = totalMin + "m";
+        }
+
+        lbl.textContent = (cdMode === "cur") ? "Time Left" : "Time Until";
+        cdTimer = setTimeout(tick, 1000);
+
+      } else {
+        if (cdMode === "cur") {
+          setPulse("red");
+          setBarMode("red");
+          lbl.textContent = "";
+          out.className = "val expired-msg";
+          out.textContent = "TIME EXPIRED";
+
+          var curEl = document.getElementById('curv');
+          if(lastCurName){ curEl.innerHTML = "Time expired — " + lastCurName; }
+          else { curEl.innerHTML = "Time expired"; }
+
+          setTimeout(function(){
+            setPulse("blue");
+            setBarMode(currentIsSkill ? "skill" : "blue");
+            resetExpiredVisuals();
+            if(nxtStart){
+              cdMode   = "next";
+              cdTarget = nxtStart;
+              tick();
+            } else {
+              cdMode   = "none";
+              cdTarget = null;
+              lastGood = null;
+              refresh(true);
+            }
+          }, 30000);
+
+        } else if (cdMode === "next") {
+          cdTarget = null;
+          cdMode   = "none";
+          out.className = "val";
+          out.textContent = "--";
+          lbl.textContent = "Time Left";
+          setPulse("blue");
+          setBarMode("blue");
+          try{ refresh(true); }catch(e){}
+
+        } else {
+          setPulse("blue");
+          setBarMode("blue");
+          lbl.textContent = "Time Until";
+          out.className = "val";
+          out.textContent = "--";
+          cdTarget = null;
+          cdTimer = setTimeout(tick, 2000);
+        }
+      }
+    }
+
+    tick();
   }
 
+  function fmtTimeRange(start, end){
+    return "<div class='meta'>"+toLocalNY(start)+" - "+toLocalNY(end)+"</div>";
+  }
+
+  function shortName(p){
+    var fn = (p.FirstName||"").trim();
+    var ln = (p.LastName||"").trim();
+    var init = fn ? (fn.charAt(0).toUpperCase()+".") : "";
+    return (init && ln) ? (init+" "+ln) : (init || ln || "");
+  }
+
+  function isCancelledEvent(x){
+    if(!x || typeof x !== "object") return false;
+    if(x.IsCanceled === true || x.IsCancelled === true || x.Cancelled === true) return true;
+    if(x.IsActive === false || x.Active === false) return true;
+
+    var statusStr = "";
+    if(typeof x.Status === "string")              statusStr += " " + x.Status;
+    if(typeof x.EventStatus === "string")         statusStr += " " + x.EventStatus;
+    if(typeof x.RegistrationStatus === "string")  statusStr += " " + x.RegistrationStatus;
+    statusStr = statusStr.toLowerCase();
+    if(statusStr.indexOf("cancel") >= 0) return true;
+
+    return false;
+  }
+
+  // ======= OVERLAY HELPERS =======
   function applyOverlayLevelStyles(){
     var box = document.getElementById("overlayBox");
     var lvl = document.getElementById("overlayLevel");
@@ -258,132 +540,167 @@
     }
   }
 
-  function shortName(p){
-    var fn = (p.FirstName||"").trim(), ln = (p.LastName||"").trim();
-    var init = fn ? fn.charAt(0).toUpperCase() + "." : "";
-    return (init && ln) ? (init + " " + ln) : (init || ln || "");
+  // ======= RENDER =======
+  function render(cur, nxt){
+    var curEl = document.getElementById('curv');
+    var nxtEl = document.getElementById('nxtv');
+
+    if(cur){
+      lastCurName = cur.name + fmtTimeRange(cur.start, cur.end);
+
+      var levelInfo = getLevelInfoFromTitle(cur.name || "");
+      currentLevelLabel = levelInfo.label;
+      currentLevelBg    = levelInfo.bg;
+      currentIsSkill    = !!levelInfo.isSkill;
+
+      curEl.innerHTML = cur.name + fmtTimeRange(cur.start, cur.end);
+      setBarMode(currentIsSkill ? "skill" : "blue");
+      startCountdown(cur.end.getTime(), "cur");
+
+    } else {
+      currentLevelLabel = "";
+      currentLevelBg    = "#0c0c0c";
+      currentIsSkill    = false;
+
+      curEl.textContent = "No current event";
+      setBarMode("blue");
+
+      if(nxt){ startCountdown(nxt.start.getTime(), "next"); }
+      else    { startCountdown(null, "none"); }
+    }
+
+    if(nxt){
+      nxtEl.innerHTML = nxt.name + fmtTimeRange(nxt.start, nxt.end);
+    } else {
+      nxtEl.textContent = "No upcoming event";
+    }
+
+    nxtStart = nxt ? nxt.start.getTime() : null;
   }
 
-  function startCountdown(targetMs, mode){
-    cdTarget = targetMs; cdMode = mode||"none";
-    if(cdTimer) clearInterval(cdTimer);
+  // ======= DATA (CLOUDFLARE PROXY + CACHE FALLBACK) =======
+  function buildDayUrl(){
+    return PROXY_BASE + "?court=" + COURT_NO + "&r=" + Date.now();
+  }
 
-    cdTimer = setInterval(function(){
-      var diff = cdTarget - Date.now();
-      var out = document.getElementById('cdv'), lbl = document.getElementById('cdlbl');
+  function normalizeEvent(x){
+    if(isCancelledEvent(x)) return null;
+    var nm = (x.EventName || x.Name || x.Title || "Event");
+    var s  = parseTimeAny(x.StartDateTime||x.StartTime||x.Start);
+    var e  = parseTimeAny(x.EndDateTime  ||x.EndTime  ||x.End);
+    return (s && e) ? {kind:"event", name:nm, start:s, end:e, raw:x} : null;
+  }
 
-      if(diff > 0){
-        if(cdMode === "cur" && diff <= 60000){
-          setPulse("red");
-          setBarMode("red");
-          out.className = "val";
-          out.textContent = Math.floor(diff/1000) + "s";
-        } else {
-          setPulse("blue");
-          setBarMode(currentIsSkill ? "skill" : "blue");
+  function normalizeResv(x){
+    var s = parseTimeAny(x.StartTime||x.StartDateTime||x.Start);
+    var e = parseTimeAny(x.EndTime||x.EndDateTime||x.End);
+    if(!s || !e) return null;
 
-          out.className = "val";
-          var totalMin = Math.floor(diff/60000);
-          if(totalMin >= 60){
-            out.textContent = Math.floor(totalMin/60) + "h " + (totalMin%60) + "m";
-          } else {
-            out.textContent = totalMin + "m";
-          }
-        }
-        lbl.textContent = (cdMode === "cur") ? "Time Left" : "Time Until";
-      } else {
-        if(cdMode === "cur") {
-          out.textContent = "TIME EXPIRED";
-          out.className = "val expired-msg";
-          setPulse("red");
-          setBarMode("red");
-        } else {
-          refresh();
-        }
+    var name = "";
+    if(Array.isArray(x.Players) && x.Players.length){
+      var arr = [];
+      for(var i=0;i<x.Players.length;i++){
+        arr.push(shortName(x.Players[i]||{}));
       }
-    }, 1000);
+      name = arr.join(", ");
+    }
+    if(!name && x.ReservationTypeName) name = x.ReservationTypeName;
+    if(!name) name = "Reserved";
+
+    return {kind:"res", name:name, start:s, end:e, raw:x};
   }
+
+  var cacheEv = [], cacheRes = [];
 
   function refresh(){
-    var url = PROXY_BASE + "?court=" + COURT_NO + "&r=" + Date.now();
-    var x = new XMLHttpRequest();
-    x.open("GET", url, true);
-    x.onreadystatechange = function(){
-      if(x.readyState === 4 && x.status === 200){
-        var data = JSON.parse(x.responseText);
-        var all = [];
-        var ev = pickArray(data.events), rs = pickArray(data.reservations);
-
-        ev.concat(rs).forEach(function(item){
-          var s = parseTimeAny(item.StartTime || item.StartDateTime);
-          var e = parseTimeAny(item.EndTime   || item.EndDateTime);
-
-          // keep your original “stable” canceled flag check
-          if(s && e && containsCourtN(item, COURT_NO) && !item.IsCanceled){
-            var name = "";
-            if(item.Players && item.Players.length){
-              name = item.Players.map(shortName).join(", ");
-            }
-            if(!name) name = item.EventName || item.Name || item.ReservationTypeName || "Reserved";
-            all.push({name: name, start: s, end: e});
-          }
-        });
-
-        all.sort(function(a,b){ return a.start - b.start; });
-
-        var now = new Date(), cur = null, nxt = null;
-        all.forEach(function(i){
-          if(now >= i.start && now <= i.end) cur = i;
-          else if(!nxt && now < i.start) nxt = i;
-        });
-
-        // Apply skill mode based on CURRENT event name (only)
-        if(cur && cur.name){
-          applySkillFromName(cur.name);
-        } else {
-          currentLevelLabel = "";
-          currentLevelBg    = "#0c0c0c";
-          currentIsSkill    = false;
-        }
-
-        // Render
-        document.getElementById('curv').innerHTML = cur
-          ? cur.name + "<div class='meta'>" + toLocalNY(cur.start) + " - " + toLocalNY(cur.end) + "</div>"
-          : "No current event";
-
-        document.getElementById('nxtv').innerHTML = nxt
-          ? nxt.name + "<div class='meta'>" + toLocalNY(nxt.start) + " - " + toLocalNY(nxt.end) + "</div>"
-          : "No upcoming event";
-
-        // Set base bar mode immediately (countdown will override to red near end)
-        setBarMode(currentIsSkill ? "skill" : "blue");
-
-        if(cur) startCountdown(cur.end.getTime(), "cur");
-        else if(nxt) startCountdown(nxt.start.getTime(), "next");
+    var url = buildDayUrl();
+    xhrJSON(url, null, 8000, function(err, data){
+      if(!err && data){
+        cacheEv  = pickArray(data.events);
+        cacheRes = pickArray(data.reservations);
       }
-    };
-    x.send();
+      computeAndRender();
+    });
   }
 
+  function computeAndRender(){
+    var ev = [], rs = [], i;
+
+    for(i=0;i<cacheEv.length;i++){
+      var a = normalizeEvent(cacheEv[i]);
+      if(a) ev.push(a);
+    }
+    for(i=0;i<cacheRes.length;i++){
+      var b = normalizeResv(cacheRes[i]);
+      if(b) rs.push(b);
+    }
+
+    var evC = [], rsC = [];
+    for(i=0;i<ev.length;i++){
+      if(containsCourtN(ev[i].raw, COURT_NO)) evC.push(ev[i]);
+    }
+    for(i=0;i<rs.length;i++){
+      if(containsCourtN(rs[i].raw, COURT_NO)) rsC.push(rs[i]);
+    }
+
+    var all = rsC.concat(evC);
+    all.sort(function(a,b){ return a.start - b.start; });
+
+    var now = new Date();
+    var cur = null, nxt = null;
+
+    for(i=0;i<all.length;i++){
+      var it = all[i];
+
+      if(now >= it.start && now <= it.end){
+        if(!cur){
+          cur = it;
+        } else if(cur.kind === "event" && it.kind === "res"){
+          cur = it; // reservation wins if overlap
+        }
+      }
+
+      if(!nxt && now < it.start){
+        nxt = it;
+      }
+    }
+
+    if(cur || nxt) lastGood = {cur:cur, nxt:nxt};
+
+    if(cur || nxt) render(cur, nxt);
+    else if(lastGood) render(lastGood.cur, lastGood.nxt);
+    else render(null, null);
+  }
+
+  // ===== POPUP OVERLAY LOOP =====
   function showOverlay(){
-    document.getElementById("overlayBody").innerHTML = document.getElementById("curv").innerHTML;
+    var bodyEl = document.getElementById("overlayBody");
+    var curEl  = document.getElementById("curv");
+    if(curEl && bodyEl){
+      bodyEl.innerHTML = curEl.innerHTML || curEl.textContent || "";
+    }
     applyOverlayLevelStyles();
     document.getElementById("infoOverlay").classList.add("active");
     setTimeout(function(){ document.getElementById("infoOverlay").classList.remove("active"); }, 10000);
   }
 
-  // clock
-  setInterval(function(){ document.getElementById('clock').textContent = toLocalNY(new Date()); }, 1000);
+  function startOverlayMinuteLoop(){
+    var now = new Date();
+    var msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+    if(msUntilNextMinute < 100) msUntilNextMinute = 100;
 
-  // init
+    setTimeout(function(){
+      showOverlay();
+      setInterval(showOverlay, 60000);
+    }, msUntilNextMinute);
+  }
+
+  // ===== INIT =====
+  document.getElementById('cno').textContent = String(COURT_NO);
+  tickClock();
   refresh();
   setInterval(refresh, 30000);
-
-  // overlay on-the-minute
-  setTimeout(function(){
-    showOverlay();
-    setInterval(showOverlay, 60000);
-  }, (60 - (new Date()).getSeconds()) * 1000);
+  startOverlayMinuteLoop();
 })();
 </script>
 </body>
