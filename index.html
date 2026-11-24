@@ -1095,10 +1095,12 @@
       overlayLvlEl.style.display="block";
       overlayLvlEl.textContent=currentLevelLabel;
       overlayBoxEl.style.backgroundColor=currentLevelBg||"#0c0c0c";
+      overlayBoxEl.setAttribute("data-bg",(currentLevelBg||"#0c0c0c").toLowerCase());
     } else {
       overlayLvlEl.style.display="none";
       overlayLvlEl.textContent="";
       overlayBoxEl.style.backgroundColor="#0c0c0c";
+      overlayBoxEl.setAttribute("data-bg","#0c0c0c");
     }
   }
 
