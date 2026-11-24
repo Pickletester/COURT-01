@@ -1113,7 +1113,7 @@
     if(isInLastMinuteOfEvent()) return;
     if(!infoOverlay) return;
     var curEl=document.getElementById("curv");
-    if(curEl&&overlayBodyEl) overlayBodyEl.innerHTML=curEl.innerHTML||curEl.textContent||"";
+    if(curEl&&overlayBodyEl){ var __t=curEl.textContent||""; overlayBodyEl.innerHTML=/no current event/i.test(__t)?"":(curEl.innerHTML||__t); }
     applyOverlayStyles();
     infoOverlay.classList.add("active");
     setTimeout(function(){ infoOverlay.classList.remove("active"); },10000);
