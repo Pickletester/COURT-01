@@ -1098,12 +1098,12 @@
   function applyOverlayStyles(){
     if(!overlayBoxEl||!overlayLvlEl) return;
     if(currentLevelLabel){
-      overlayLvlEl.style.display="block";
+      overlayLvlEl.style.display="block"; var __lgS=document.querySelector("#overlayBox .overlayLogo"); if(__lgS) __lgS.style.display="";
       overlayLvlEl.textContent=currentLevelLabel;
       overlayBoxEl.style.backgroundColor=currentLevelBg||"#0c0c0c";
       overlayBoxEl.setAttribute("data-bg",(currentLevelBg||"#0c0c0c").toLowerCase());
     } else {
-      overlayLvlEl.style.display="none";
+      overlayLvlEl.style.display="none"; var __lgH=document.querySelector("#overlayBox .overlayLogo"); if(__lgH) __lgH.style.display="none";
       overlayLvlEl.textContent="";
       overlayBoxEl.style.backgroundColor="#0c0c0c";
       overlayBoxEl.setAttribute("data-bg","#0c0c0c");
